@@ -26,6 +26,7 @@ from transformers.utils import is_flash_attn_2_available
 from accelerate import init_empty_weights
 from tqdm import tqdm
 
+
 # -----------------------------
 # Utilities
 # -----------------------------
@@ -33,8 +34,10 @@ from tqdm import tqdm
 def sha256_of(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+
 def now_iso() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
 
 def human_bytes(n: int) -> str:
     if n is None:
@@ -46,6 +49,7 @@ def human_bytes(n: int) -> str:
         x /= 1024.0
         i += 1
     return f"{x:.2f} {suffixes[i]}"
+
 
 # -----------------------------
 # Schema
@@ -60,6 +64,7 @@ class GenParams:
     max_new_tokens: int = 256
     repetition_penalty: float = 1.0
     stop: List[str] = field(default_factory=list)
+
 
 @dataclass
 class RunMeta:
@@ -80,6 +85,7 @@ class RunMeta:
     pad_to_max_length: bool
     max_input_length: int
 
+
 @dataclass
 class Row:
     run_id: str
@@ -97,16 +103,18 @@ class Row:
     gpu_max_mem: Optional[str]
     err: Optional[str] = None
 
+
 # -----------------------------
 # Core
 # -----------------------------
 
 def prepare_tokenizer(model_id: str):
-    tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+    tok = AutoTokenizer.from_pretrained(model_id, token = "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")
     # Ensure pad token for batching, typical for LLaMA/Mistral:
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     return tok
+
 
 def get_dtype(precision: str):
     precision = precision.lower()
@@ -117,6 +125,7 @@ def get_dtype(precision: str):
     if precision in ["fp32", "float32"]:
         return torch.float32
     raise ValueError(f"Unknown precision: {precision}")
+
 
 def load_model(model_id: str, precision: str, load_in_8bit: bool, load_in_4bit: bool, device_map: str):
     dtype = get_dtype(precision)
@@ -131,23 +140,23 @@ def load_model(model_id: str, precision: str, load_in_8bit: bool, load_in_4bit: 
     elif load_in_4bit:
         kw.update(dict(load_in_4bit=True, bnb_4bit_compute_dtype=dtype))
     else:
-        kw.update(dict(torch_dtype=dtype))
+        kw.update(dict(dtype=dtype))
 
-    model = AutoModelForCausalLM.from_pretrained(model_id, **kw)
+    model = AutoModelForCausalLM.from_pretrained(model_id, token = "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", **kw)
     model.eval()
     return model
 
-def run_batched_generation(
-    model,
-    tok,
-    prompts: List[str],
-    params: GenParams,
-    batch_size: int,
-    pad_to_max_length: bool,
-    max_input_length: int,
-    seed: Optional[int] = None,
-) -> List[Row]:
 
+def run_batched_generation(
+        model,
+        tok,
+        prompts: List[str],
+        params: GenParams,
+        batch_size: int,
+        pad_to_max_length: bool,
+        max_input_length: int,
+        seed: Optional[int] = None,
+) -> List[Row]:
     device = model.device if hasattr(model, "device") else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if seed is not None:
         torch.manual_seed(seed)
@@ -242,6 +251,7 @@ def run_batched_generation(
 
     return rows
 
+
 def save_outputs(rows: List[Row], out_jsonl: Path, out_csv: Path, run_meta: RunMeta):
     # attach run_id to rows and write JSONL
     with out_jsonl.open("a", encoding="utf-8") as f:
@@ -251,9 +261,9 @@ def save_outputs(rows: List[Row], out_jsonl: Path, out_csv: Path, run_meta: RunM
 
     # also write CSV (one row per sample, meta collapsed)
     fieldnames = [
-        "run_id","uid","index","prompt_hash","prompt_len_tokens",
-        "output_len_tokens","input_plus_output_tokens","latency_s","tok_per_s","gpu_max_mem",
-        "model_id","precision","quantization","batch_size","max_input_length","created_at"
+        "run_id", "uid", "index", "prompt_hash", "prompt_len_tokens",
+        "output_len_tokens", "input_plus_output_tokens", "latency_s", "tok_per_s", "gpu_max_mem",
+        "model_id", "precision", "quantization", "batch_size", "max_input_length", "created_at"
     ]
     # deduplicate uids for CSV (latest wins)
     by_uid = {}
@@ -273,7 +283,7 @@ def save_outputs(rows: List[Row], out_jsonl: Path, out_csv: Path, run_meta: RunM
                 "output_len_tokens": r.output_len_tokens,
                 "input_plus_output_tokens": r.input_plus_output_tokens,
                 "latency_s": f"{r.latency_s:.4f}",
-                "tok_per_s": f"{r.tok_per_s:.3f}" if r.tok_per_s==r.tok_per_s else "NaN",
+                "tok_per_s": f"{r.tok_per_s:.3f}" if r.tok_per_s == r.tok_per_s else "NaN",
                 "gpu_max_mem": r.gpu_max_mem or "NA",
                 "model_id": run_meta.model_id,
                 "precision": run_meta.precision,
@@ -283,11 +293,14 @@ def save_outputs(rows: List[Row], out_jsonl: Path, out_csv: Path, run_meta: RunM
                 "created_at": run_meta.created_at,
             })
 
+
 def main():
     p = argparse.ArgumentParser(description="Reusable batched inference for open-source AR LLMs")
-    p.add_argument("--model", required=True, help="HF model id, e.g., mistralai/Mistral-7B-Instruct-v0.2 or meta-llama/Meta-Llama-3-8B-Instruct")
+    p.add_argument("--model", required=True,
+                   help="HF model id, e.g., mistralai/Mistral-7B-Instruct-v0.2 or meta-llama/Meta-Llama-3-8B-Instruct")
     p.add_argument("--revision", default=None, help="Specific commit or tag for reproducibility")
-    p.add_argument("--precision", default="bf16", choices=["bf16","fp16","fp32"], help="Compute dtype when NOT quantized")
+    p.add_argument("--precision", default="bf16", choices=["bf16", "fp16", "fp32"],
+                   help="Compute dtype when NOT quantized")
     p.add_argument("--load_in_8bit", action="store_true")
     p.add_argument("--load_in_4bit", action="store_true")
     p.add_argument("--device_map", default="auto")
@@ -391,6 +404,7 @@ def main():
     ok = len(rows) >= 10 and all((r.err is None and isinstance(r.output, str) and len(r.output) > 0) for r in rows[:10])
     print(f"[ACCEPTANCE] >=10 prompts completed & saved: {'PASS' if ok else 'FAIL'}")
     print(f"Wrote: {out_jsonl} and {out_csv}")
+
 
 if __name__ == "__main__":
     main()
