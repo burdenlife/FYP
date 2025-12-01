@@ -558,8 +558,8 @@ class TransfoXLPreTrainedModel(PreTrainedModel):
 
         new_num_tokens_layer = (
             new_num_tokens
-            - sum([emb.weight.shape[0] for emb in embeddings.emb_layers[:layer]])
-            - sum([emb.weight.shape[0] for emb in embeddings.emb_layers[layer + 1 :]])
+            - sum(emb.weight.shape[0] for emb in embeddings.emb_layers[:layer])
+            - sum(emb.weight.shape[0] for emb in embeddings.emb_layers[layer + 1 :])
         )
         return new_num_tokens_layer, layer
 
@@ -618,7 +618,7 @@ class TransfoXLModelOutput(ModelOutput):
     """
 
     last_hidden_state: torch.FloatTensor
-    mems: list[torch.FloatTensor] = None
+    mems: Optional[list[torch.FloatTensor]] = None
     hidden_states: Optional[tuple[torch.FloatTensor]] = None
     attentions: Optional[tuple[torch.FloatTensor]] = None
 
@@ -652,7 +652,7 @@ class TransfoXLSequenceClassifierOutputWithPast(ModelOutput):
 
     loss: Optional[torch.FloatTensor] = None
     logits: Optional[torch.FloatTensor] = None
-    mems: list[torch.FloatTensor] = None
+    mems: Optional[list[torch.FloatTensor]] = None
     hidden_states: Optional[tuple[torch.FloatTensor]] = None
     attentions: Optional[tuple[torch.FloatTensor]] = None
 
@@ -688,7 +688,7 @@ class TransfoXLLMHeadModelOutput(ModelOutput):
 
     losses: Optional[torch.FloatTensor] = None
     prediction_scores: Optional[torch.FloatTensor] = None
-    mems: list[torch.FloatTensor] = None
+    mems: Optional[list[torch.FloatTensor]] = None
     hidden_states: Optional[tuple[torch.FloatTensor]] = None
     attentions: Optional[tuple[torch.FloatTensor]] = None
     loss: Optional[torch.FloatTensor] = None

@@ -249,7 +249,7 @@ class SmolVLMProcessor(ProcessorMixin):
         images: Union[ImageInput, list[ImageInput], list[list[ImageInput]]] = None,
         text: Union[TextInput, "PreTokenizedInput", list[TextInput], list["PreTokenizedInput"]] = None,
         audio=None,
-        videos: VideoInput = None,
+        videos: Optional[VideoInput] = None,
         **kwargs: Unpack[SmolVLMProcessorKwargs],
     ) -> BatchEncoding:
         """
@@ -316,7 +316,7 @@ class SmolVLMProcessor(ProcessorMixin):
                 text = [text]
             elif not isinstance(text, list) and not isinstance(text[0], str):
                 raise ValueError("Invalid input text. Please provide a string, or a list of strings")
-            n_images_in_text = sum([sample.count(self.image_token) for sample in text])
+            n_images_in_text = sum(sample.count(self.image_token) for sample in text)
             if n_images_in_text > 0 and (images is None and videos is None):
                 raise ValueError(f"We detected {n_images_in_text} tokens in the text but no images/videos were passed")
 

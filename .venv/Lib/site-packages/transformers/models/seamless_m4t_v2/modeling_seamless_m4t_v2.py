@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 import torch
-import torch.utils.checkpoint
 from torch import Tensor, nn
 from torch.nn import CrossEntropyLoss
 
@@ -494,8 +493,6 @@ class SeamlessM4Tv2ConformerEncoderLayer(GradientCheckpointingLayer):
         output_attentions: bool = False,
         conv_attention_mask: Optional[torch.Tensor] = None,
     ):
-        hidden_states = hidden_states
-
         # 1. Feed-Forward 1 layer
         residual = hidden_states
         hidden_states = self.ffn1_layer_norm(hidden_states)
@@ -558,7 +555,6 @@ class SeamlessM4Tv2ConformerEncoder(nn.Module):
         if self.config.speech_encoder_left_chunk_num >= 0:
             start_indices = (chunk_indices - self.config.speech_encoder_left_chunk_num).clamp_(min=0)
             start_indices = start_indices * self.config.speech_encoder_chunk_size
-            start_indices = start_indices
         start_indices = start_indices.unsqueeze(1).expand(-1, sequence_len)
 
         end_indices = ((chunk_indices + 1) * self.config.speech_encoder_chunk_size).clamp_(max=sequence_len)
@@ -916,6 +912,7 @@ class SeamlessM4Tv2Attention(nn.Module):
         is_cross_attention = encoder_hidden_states is not None
         batch_size, seq_length = hidden_states.shape[:2]
 
+        is_updated = False
         if past_key_values is not None:
             if isinstance(past_key_values, EncoderDecoderCache):
                 is_updated = past_key_values.is_updated.get(self.layer_idx)
@@ -945,7 +942,7 @@ class SeamlessM4Tv2Attention(nn.Module):
                     key_states, value_states, self.layer_idx, {"cache_position": cache_position}
                 )
                 # set flag that curr layer for cross-attn is already updated so we can re-use in subsequent calls
-                if is_cross_attention:
+                if is_cross_attention and isinstance(past_key_values, EncoderDecoderCache):
                     past_key_values.is_updated[self.layer_idx] = True
 
         query_states = self.q_proj(hidden_states)
@@ -1118,7 +1115,7 @@ class SeamlessM4Tv2DecoderLayer(GradientCheckpointingLayer):
             encoder_attention_mask (`torch.FloatTensor`):
                 encoder attention mask of size `(batch, 1, tgt_len, src_len)` where padding elements are indicated by
                 very large negative values.
-            past_key_values (`Tuple(torch.FloatTensor)`):
+            past_key_values (`Cache`):
                 cached past key and value projection states
             output_attentions (`bool`, *optional*):
                 Whether or not to return the attentions tensors of all attention layers. See `attentions` under
@@ -1804,7 +1801,7 @@ class SeamlessM4Tv2Decoder(SeamlessM4Tv2PreTrainedModel):
         attention_mask: Optional[torch.Tensor] = None,
         encoder_hidden_states: Optional[torch.FloatTensor] = None,
         encoder_attention_mask: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[tuple[tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
@@ -2380,7 +2377,7 @@ class SeamlessM4Tv2VariancePredictor(nn.Module):
             kernel_size=kernel_size,
             padding="same",
         )
-        self.activation_fuction = nn.ReLU()
+        self.activation_function = nn.ReLU()
         self.ln1 = nn.LayerNorm(hidden_dim)
         self.dropout_module = nn.Dropout(p=var_pred_dropout)
         self.conv2 = nn.Conv1d(
@@ -2397,12 +2394,12 @@ class SeamlessM4Tv2VariancePredictor(nn.Module):
         if padding_mask is not None:
             hidden_states = hidden_states.masked_fill(~padding_mask.bool().unsqueeze(-1), 0.0)
         hidden_states = self.conv1(hidden_states.transpose(1, 2))
-        hidden_states = self.activation_fuction(hidden_states).transpose(1, 2)
+        hidden_states = self.activation_function(hidden_states).transpose(1, 2)
         hidden_states = self.dropout_module(self.ln1(hidden_states))
         if padding_mask is not None:
             hidden_states = hidden_states.masked_fill(~padding_mask.bool().unsqueeze(-1), 0.0)
         hidden_states = self.conv2(hidden_states.transpose(1, 2))
-        hidden_states = self.activation_fuction(hidden_states).transpose(1, 2)
+        hidden_states = self.activation_function(hidden_states).transpose(1, 2)
         hidden_states = self.dropout_module(self.ln2(hidden_states))
         return self.proj(hidden_states).squeeze(dim=2)
 
@@ -2714,7 +2711,7 @@ class SeamlessM4Tv2ForTextToText(SeamlessM4Tv2PreTrainedModel, GenerationMixin):
         decoder_input_ids: Optional[torch.LongTensor] = None,
         decoder_attention_mask: Optional[torch.LongTensor] = None,
         encoder_outputs: Optional[tuple[tuple[torch.FloatTensor]]] = None,
-        past_key_values: Optional[tuple[tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
@@ -2973,7 +2970,7 @@ class SeamlessM4Tv2ForSpeechToText(SeamlessM4Tv2PreTrainedModel, GenerationMixin
         decoder_input_ids: Optional[torch.LongTensor] = None,
         decoder_attention_mask: Optional[torch.LongTensor] = None,
         encoder_outputs: Optional[tuple[tuple[torch.FloatTensor]]] = None,
-        past_key_values: Optional[tuple[tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
@@ -3250,7 +3247,7 @@ class SeamlessM4Tv2ForTextToSpeech(SeamlessM4Tv2PreTrainedModel, GenerationMixin
         decoder_input_ids: Optional[torch.LongTensor] = None,
         decoder_attention_mask: Optional[torch.LongTensor] = None,
         encoder_outputs: Optional[tuple[tuple[torch.FloatTensor]]] = None,
-        past_key_values: Optional[tuple[tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
@@ -3606,7 +3603,7 @@ class SeamlessM4Tv2ForSpeechToSpeech(SeamlessM4Tv2PreTrainedModel, GenerationMix
         decoder_input_ids: Optional[torch.LongTensor] = None,
         decoder_attention_mask: Optional[torch.LongTensor] = None,
         encoder_outputs: Optional[tuple[tuple[torch.FloatTensor]]] = None,
-        past_key_values: Optional[tuple[tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
@@ -3997,7 +3994,7 @@ class SeamlessM4Tv2Model(SeamlessM4Tv2PreTrainedModel, GenerationMixin):
         decoder_input_ids: Optional[torch.LongTensor] = None,
         decoder_attention_mask: Optional[torch.LongTensor] = None,
         encoder_outputs: Optional[tuple[tuple[torch.FloatTensor]]] = None,
-        past_key_values: Optional[tuple[tuple[torch.FloatTensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
@@ -4178,8 +4175,9 @@ class SeamlessM4Tv2Model(SeamlessM4Tv2PreTrainedModel, GenerationMixin):
                 [`SeamlessM4TProcessor`] class. See [`SeamlessM4TFeatureExtractor.__call__`] for details.
             return_intermediate_token_ids (`bool`, *optional*):
                 If `True`, also returns the intermediate generated text and unit tokens. Set to `True` if you also want
-                to get translated text alongside the audio. Note that if `generate_speech=True`, this parameter will be
-                ignored.
+                to get translated text alongside the audio.
+                Note that if `generate_speech=False`, this parameter will be ignored and
+                the text tokens are returned.
             tgt_lang (`str`, *optional*):
                 The language to use as target language for translation.
             speaker_id (`int`, *optional*, defaults to 0):

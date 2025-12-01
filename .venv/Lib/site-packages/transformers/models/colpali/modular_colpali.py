@@ -28,7 +28,6 @@ from ...utils import is_torch_available, logging
 if is_torch_available():
     import torch
 
-
 logger = logging.get_logger(__name__)
 
 
@@ -89,7 +88,7 @@ class ColPaliProcessor(PaliGemmaProcessor):
 
     def __call__(
         self,
-        images: ImageInput = None,
+        images: Optional[ImageInput] = None,
         text: Union[TextInput, PreTokenizedInput, list[TextInput], list[PreTokenizedInput]] = None,
         audio=None,
         videos=None,
@@ -208,7 +207,7 @@ class ColPaliProcessor(PaliGemmaProcessor):
 
     def process_images(
         self,
-        images: ImageInput = None,
+        images: Optional[ImageInput] = None,
         **kwargs: Unpack[ColPaliProcessorKwargs],
     ) -> BatchFeature:
         """

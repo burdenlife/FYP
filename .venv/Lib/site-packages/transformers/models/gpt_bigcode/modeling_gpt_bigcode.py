@@ -17,7 +17,6 @@ import math
 from typing import Callable, Optional, Union
 
 import torch
-import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
@@ -419,9 +418,6 @@ class GPTBigCodeModel(GPTBigCodePreTrainedModel):
 
         self.gradient_checkpointing = False
 
-        self._use_sdpa = config._attn_implementation == "sdpa"
-        self._use_flash_attention_2 = config._attn_implementation == "flash_attention_2"
-
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -436,7 +432,7 @@ class GPTBigCodeModel(GPTBigCodePreTrainedModel):
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
-        past_key_values: Optional[list[torch.Tensor]] = None,
+        past_key_values: Optional[Cache] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
@@ -518,7 +514,7 @@ class GPTBigCodeModel(GPTBigCodePreTrainedModel):
             past_key_values=past_key_values,
         )
 
-        if self._use_flash_attention_2:
+        if self.config._attn_implementation == "flash_attention_2":
             encoder_attention_mask = (
                 encoder_attention_mask.bool()
                 if (encoder_attention_mask is not None and 0 in encoder_attention_mask)
@@ -619,7 +615,7 @@ class GPTBigCodeForCausalLM(GPTBigCodePreTrainedModel, GenerationMixin):
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
-        past_key_values: Optional[tuple[tuple[torch.Tensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
@@ -726,7 +722,7 @@ class GPTBigCodeForSequenceClassification(GPTBigCodePreTrainedModel):
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
-        past_key_values: Optional[tuple[tuple[torch.Tensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
@@ -859,7 +855,7 @@ class GPTBigCodeForTokenClassification(GPTBigCodePreTrainedModel):
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
-        past_key_values: Optional[tuple[tuple[torch.Tensor]]] = None,
+        past_key_values: Optional[Cache] = None,
         attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,

@@ -51,7 +51,6 @@ from .generic import (
     PaddingStrategy,
     TensorType,
     TransformersKwargs,
-    cached_property,
     can_return_loss,
     can_return_tuple,
     expand_dims,
@@ -108,7 +107,6 @@ from .hub import (
     is_offline_mode,
     is_remote_url,
     list_repo_templates,
-    send_example_telemetry,
     try_to_load_from_cache,
 )
 from .import_utils import (
@@ -173,7 +171,6 @@ from .import_utils import (
     is_huggingface_hub_greater_or_equal,
     is_in_notebook,
     is_ipex_available,
-    is_jieba_available,
     is_jinja_available,
     is_jumanpp_available,
     is_kenlm_available,

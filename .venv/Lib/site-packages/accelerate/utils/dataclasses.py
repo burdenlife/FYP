@@ -127,7 +127,7 @@ class AutocastKwargs(KwargsHandler):
     """
 
     enabled: bool = True
-    cache_enabled: bool = None
+    cache_enabled: Optional[bool] = None
 
 
 class DDPCommunicationHookType(BaseEnum):
@@ -364,13 +364,14 @@ class TERecipeKwargs(KwargsHandler):
             Whether or not to execute `fprop`, `dgrad`, and `wgrad` GEMMS in higher precision.
     """
 
-    use_autocast_during_eval: bool = None
-    margin: int = None
-    interval: int = None
+    use_autocast_during_eval: Optional[bool] = None
+    margin: Optional[int] = None
+    interval: Optional[int] = None
     fp8_format: FP8Format = None
-    amax_history_len: int = None
+    amax_history_len: Optional[int] = None
     amax_compute_algo: AmaxComputeAlgorithm = None
     override_linear_precision: tuple[bool, bool, bool] = None
+    use_mxfp8_block_scaling: Optional[bool] = None
 
     def __post_init__(self):
         env_prefix = "ACCELERATE_FP8_"
@@ -399,6 +400,8 @@ class TERecipeKwargs(KwargsHandler):
             dgrad = parse_flag_from_env(env_prefix + "OVERRIDE_DGRAD")
             wgrad = parse_flag_from_env(env_prefix + "OVERRIDE_WGRAD")
             self.override_linear_precision = (fprop, dgrad, wgrad)
+        if self.use_mxfp8_block_scaling is None:
+            self.use_mxfp8_block_scaling = parse_flag_from_env(env_prefix + "USE_MXFP8_BLOCK_SCALING")
 
 
 @dataclass
@@ -680,7 +683,7 @@ class DynamoBackend(str, BaseEnum):
           more](https://github.com/pytorch/xla/blob/r2.0/docs/dynamo.md)
         - **IPEX** -- Uses IPEX for inference on CPU. Inference only. [Read
           more](https://github.com/intel/intel-extension-for-pytorch).
-        - **TVM** -- Uses Apach TVM for inference optimizations. [Read more](https://tvm.apache.org/)
+        - **TVM** -- Uses Apache TVM for inference optimizations. [Read more](https://tvm.apache.org/)
         - **HPU_BACKEND** -- Uses HPU backend for inference optimizations.
 
     """
@@ -801,9 +804,9 @@ class DataLoaderConfiguration:
             all workers.
         use_seedable_sampler (`bool`, defaults to `False`):
             Whether or not use a fully seedable random sampler ([`data_loader.SeedableRandomSampler`]). Ensures
-            training results are fully reproducable using a different sampling technique. While seed-to-seed results
-            may differ, on average the differences are neglible when using multiple different seeds to compare. Should
-            also be ran with [`~utils.set_seed`] for the best results.
+            training results are fully reproducible using a different sampling technique. While seed-to-seed results
+            may differ, on average the differences are negligible when using multiple different seeds to compare.
+            Should also be ran with [`~utils.set_seed`] for the best results.
         data_seed (`int`, defaults to `None`):
             The seed to use for the underlying generator when using `use_seedable_sampler`. If `None`, the generator
             will use the current default seed from torch.
@@ -846,8 +849,8 @@ class DataLoaderConfiguration:
         default=False,
         metadata={
             "help": "Whether or not use a fully seedable random sampler ([`data_loader.SeedableRandomSampler`])."
-            "Ensures training results are fully reproducable using a different sampling technique. "
-            "While seed-to-seed results may differ, on average the differences are neglible when using"
+            "Ensures training results are fully reproducible using a different sampling technique. "
+            "While seed-to-seed results may differ, on average the differences are negligible when using"
             "multiple different seeds to compare. Should also be ran with [`~utils.set_seed`] for the best results."
         },
     )
@@ -928,7 +931,7 @@ class ProjectConfiguration:
         },
     )
 
-    def set_directories(self, project_dir: str = None):
+    def set_directories(self, project_dir: Optional[str] = None):
         "Sets `self.project_dir` and `self.logging_dir` to the appropriate values."
         self.project_dir = project_dir
         if self.logging_dir is None:
@@ -953,7 +956,7 @@ class GradientAccumulationPlugin(KwargsHandler):
         sync_with_dataloader (`bool`, *optional*, defaults to `True`):
             Whether to synchronize setting the gradients when at the end of the dataloader.
         sync_each_batch (`bool`, *optional*):
-                Whether to synchronize setting the gradients at each data batch. Seting to `True` may reduce memory
+                Whether to synchronize setting the gradients at each data batch. Setting to `True` may reduce memory
                 requirements when using gradient accumulation with distributed training, at expense of speed.
 
     Example:
@@ -1224,6 +1227,7 @@ class DeepSpeedPlugin:
 
         if self.hf_ds_config is None:
             self.hf_ds_config = os.environ.get("ACCELERATE_DEEPSPEED_CONFIG_FILE", "none")
+
         if (
             isinstance(self.hf_ds_config, dict)
             or (isinstance(self.hf_ds_config, str) and self.hf_ds_config != "none")
@@ -1550,10 +1554,12 @@ class FullyShardedDataParallelPlugin:
         backward_prefetch (`Union[str, torch.distributed.fsdp.BackwardPrefetch]`, defaults to `'NO_PREFETCH'`):
             Backward prefetch strategy to use. Should be either a `str` or an instance of
             `torch.distributed.fsdp.fully_sharded_data_parallel.BackwardPrefetch`.
-        mixed_precision_policy (`Optional[Union[dict, torch.distributed.fsdp.MixedPrecision, torch.distributed.fsdp.MixedPrecisionPolicy]]`, defaults to `None`):
+        mixed_precision_policy (`Optional[Union[dict, str, torch.distributed.fsdp.MixedPrecision, torch.distributed.fsdp.MixedPrecisionPolicy]]`, defaults to `None`):
             A config to enable mixed precision training with FullyShardedDataParallel. If passing in a `dict`, it
             should have the following keys: `param_dtype`, `reduce_dtype`, and `buffer_dtype`, can be an instance of
-            `torch.distributed.fsdp.MixedPrecisionPolicy` if `fsdp_version` is set to 2.
+            `torch.distributed.fsdp.MixedPrecisionPolicy` if `fsdp_version` is set to 2. If passing in a `str`, it
+            should be one of the following values: fp8, fp16, bf16, fp32, and used to set `param_dtype`,
+            `reduce_dtype`, and `buffer_dtype`.
         auto_wrap_policy (`Optional(Union[Callable, Literal["transformer_based_wrap", "size_based_wrap", "no_wrap"]]), defaults to `NO_WRAP`):
             A callable or string specifying a policy to recursively wrap layers with FSDP. If a string, it must be one
             of `transformer_based_wrap`, `size_based_wrap`, or `no_wrap`. See
@@ -1564,7 +1570,7 @@ class FullyShardedDataParallelPlugin:
             `torch.distributed.fsdp.fully_sharded_data_parallel.CPUOffloadPolicy` if `fsdp_version` is set to 2.
         ignored_modules (`Optional[Union[Iterable[torch.nn.Module], str]]`, defaults to `None`):
             A list of modules to ignore when wrapping with FSDP. When passing a string, will match the modules by name
-            using regex fullmatch.
+            using regex fullmatch. If `fsdp_version` is set to 2, the modules are converted to parameters and used.
         state_dict_type (`Union[str, torch.distributed.fsdp.StateDictType]`, defaults to `'FULL_STATE_DICT'`):
             State dict type to use. If a string, it must be one of `full_state_dict`, `local_state_dict`, or
             `sharded_state_dict`.
@@ -1632,6 +1638,7 @@ class FullyShardedDataParallelPlugin:
     mixed_precision_policy: Optional[
         Union[
             dict,
+            str,
             "torch.distributed.fsdp.MixedPrecision",
             "torch.distributed.fsdp.MixedPrecisionPolicy",
         ]
@@ -1905,6 +1912,9 @@ class FullyShardedDataParallelPlugin:
             self.cpu_ram_efficient_loading = (
                 str_to_bool(os.environ.get(env_prefix + "CPU_RAM_EFFICIENT_LOADING", "False")) == 1
             )
+        else:
+            # We still need to set it for transformers
+            os.environ[env_prefix + "CPU_RAM_EFFICIENT_LOADING"] = str(self.cpu_ram_efficient_loading)
         # There's no need to specify sync_module_states in FSDP2
         if self.fsdp_version == 1 and self.cpu_ram_efficient_loading and not self.sync_module_states:
             warnings.warn(
@@ -1912,18 +1922,11 @@ class FullyShardedDataParallelPlugin:
                 "Setting sync_module_states to True."
             )
             self.sync_module_states = True
-
-        if self.cpu_ram_efficient_loading != bool(
-            str_to_bool(os.environ.get(env_prefix + "CPU_RAM_EFFICIENT_LOADING", "False"))
-        ):
-            env_var = env_prefix + "CPU_RAM_EFFICIENT_LOADING"
-            warnings.warn(
-                f"The `cpu_ram_efficient_loading` flag for `FullyShardedDataParallelPlugin` does not match the environment variable {env_var}. "
-                "Setting environment variable to match `cpu_ram_efficient_loading`."
-            )
-            os.environ[env_var] = str(self.cpu_ram_efficient_loading)
-
-        if isinstance(self.mixed_precision_policy, dict):
+        if isinstance(self.mixed_precision_policy, str):
+            # override is True since self.mixed_precision_policy is not None
+            # has to be overwritten with the correct mixed precision object
+            self.set_mixed_precision(self.mixed_precision_policy, override=True)
+        elif isinstance(self.mixed_precision_policy, dict):
             self.set_mixed_precision(self.mixed_precision_policy)
         if self.mixed_precision_policy is not None:
             self.validate_mixed_precision_policy()
@@ -1948,7 +1951,12 @@ class FullyShardedDataParallelPlugin:
             # Create a function that will be used to initialize the parameters of the model
             # when using `sync_module_states`
             self.param_init_fn = lambda x: x.to_empty(device=device, recurse=False)
-
+        if is_torch_version("<", "2.7.0") and self.fsdp_version == 2 and self.ignored_modules is not None:
+            _fsdp2_warnings.add(
+                "FSDP2 ignored_params/ignored_modules is not available for torch version < 2.7.0"
+                "Setting ignored_modules to None."
+            )
+            self.ignored_modules = None
         #  Single warning for all deprecation warnings due to FSDP2 conversion
         if _fsdp2_warnings:
             logger.warning("Multiple deprecation warnings due to FSDP2 conversion:\n".join(_fsdp2_warnings))
@@ -2000,7 +2008,7 @@ class FullyShardedDataParallelPlugin:
 
     def set_auto_wrap_policy(self, model):
         """
-        Given `model`, creates an `auto_wrap_policy` baesd on the passed in policy and if we can use the
+        Given `model`, creates an `auto_wrap_policy` based on the passed in policy and if we can use the
         `transformer_cls_to_wrap`
         """
         from torch.distributed.fsdp.wrap import (
@@ -2163,14 +2171,65 @@ class TorchContextParallelConfig:
     def __post_init__(self):
         if not is_torch_version(">=", BETA_CP_AVAILABLE_PYTORCH_VERSION):
             raise ValueError(
-                f"Context parallelism is only available in PyTorch {BETA_CP_AVAILABLE_PYTORCH_VERSION} and later versions. "
+                f"FSDP2-based Context parallelism is only available in PyTorch {BETA_CP_AVAILABLE_PYTORCH_VERSION} and later versions. "
                 "Please upgrade your PyTorch version."
             )
+
         if self.cp_comm_strategy is None:
             self.cp_comm_strategy = os.environ.get("PARALLELISM_CONFIG_CP_COMM_STRATEGY", "allgather")
         if self.cp_comm_strategy not in ["allgather", "alltoall"]:
             raise ValueError(
                 f"Invalid cp_comm_strategy: {self.cp_comm_strategy}. Must be one of 'allgather' or 'alltoall'."
+            )
+
+
+@dataclass
+class DeepSpeedSequenceParallelConfig:
+    sp_seq_length: Optional[int] = field(
+        default=None,
+        metadata={
+            "help": "Sequence length for when batches are all of the same length. For variable sequence lengths across batches set `sp_seq_length_is_variable=True` and leave this field unset"
+        },
+    )
+    sp_seq_length_is_variable: Optional[bool] = field(
+        default=None,
+        metadata={
+            "help": "If `True` will work with a sequence length that may change between batches, in which case `sp_seq_length` value can be set to anything divisible by cp size or remain unset. If `False` then `sp_seq_length` needs to match the batch's sequence length dimension. The default is `True`."
+        },
+    )
+    sp_attn_implementation: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Attention implementation to use. Can be one of 'flash_attention_2', 'flash_attention_3' or 'sdpa'. Defaults to `sdpa`."
+        },
+    )
+
+    def __post_init__(self):
+        # sp_seq_length_is_variable and sp_seq_length are interconnected
+        if self.sp_seq_length_is_variable is None:
+            self.sp_seq_length_is_variable = (
+                os.environ.get("PARALLELISM_CONFIG_SP_SEQ_LENGTH_IS_VARIABLE", "true").lower() == "true"
+            )
+
+        if not self.sp_seq_length_is_variable and self.sp_seq_length is None:
+            if "PARALLELISM_CONFIG_SP_SEQ_LENGTH" not in os.environ:
+                raise ValueError(
+                    "when `sp_seq_length_is_variable` is `False` `sp_seq_length` must be provided either through the constructor or the environment variable PARALLELISM_CONFIG_SP_SEQ_LENGTH"
+                )
+            else:
+                self.sp_seq_length = os.environ.get("PARALLELISM_CONFIG_SP_SEQ_LENGTH")
+                self.sp_seq_length = None if self.sp_seq_length == "None" else int(self.sp_seq_length)
+
+        if self.sp_attn_implementation is None:
+            self.sp_attn_implementation = os.environ.get("PARALLELISM_CONFIG_SP_ATTN_IMPLEMENTATION", None)
+
+        if self.sp_attn_implementation is not None and self.sp_attn_implementation not in [
+            "flash_attention_2",
+            "flash_attention_3",
+            "sdpa",
+        ]:
+            raise ValueError(
+                f"Invalid sp_attn_implementation: {self.sp_attn_implementation}. Must be one of 'flash_attention_2', 'flash_attention_3' or 'sdpa'."
             )
 
 
@@ -2248,7 +2307,7 @@ class MegatronLMPlugin:
         lr_warmup_fraction (`float`, defaults to `None`):
             Fraction of lr-warmup-(iters/samples) to linearly warmup learning rate over.
         min_lr (`float`, defaults to `0`):
-            Minumum value for learning rate. The scheduler clip values below this threshold.
+            Minimum value for learning rate. The scheduler clip values below this threshold.
         consumed_samples (`List`, defaults to `None`):
             Number of samples consumed in the same order as the dataloaders to `accelerator.prepare` call.
         no_wd_decay_cond (`Optional`, defaults to `None`):
@@ -2375,7 +2434,7 @@ class MegatronLMPlugin:
     )
     min_lr: float = field(
         default=0,
-        metadata={"help": "Minumum value for learning rate. The scheduler clip values below this threshold."},
+        metadata={"help": "Minimum value for learning rate. The scheduler clip values below this threshold."},
     )
     consumed_samples: list[int] = field(
         default=None,
@@ -2761,7 +2820,7 @@ class BnbQuantizationConfig:
             Enable 8bit quantization.
         llm_int8_threshold (`float`, defaults to `6.0`):
             Value of the outliner threshold. Only relevant when `load_in_8bit=True`.
-        load_in_4_bit (`bool`, defaults to `False`):
+        load_in_4bit (`bool`, defaults to `False`):
             Enable 4bit quantization.
         bnb_4bit_quant_type (`str`, defaults to `fp4`):
             Set the quantization data type in the `bnb.nn.Linear4Bit` layers. Options are {'fp4','np4'}.

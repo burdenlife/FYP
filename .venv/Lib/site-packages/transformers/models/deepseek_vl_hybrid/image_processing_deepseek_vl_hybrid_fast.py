@@ -21,6 +21,7 @@
 from typing import Optional, Union
 
 import torch
+from torchvision.transforms.v2 import functional as F
 
 from ...image_processing_utils_fast import (
     BaseImageProcessorFast,
@@ -30,24 +31,16 @@ from ...image_processing_utils_fast import (
     group_images_by_shape,
     reorder_images,
 )
-from ...image_utils import OPENAI_CLIP_MEAN, OPENAI_CLIP_STD, ChannelDimension, PILImageResampling, SizeDict
-from ...processing_utils import Unpack
-from ...utils import (
-    TensorType,
-    auto_docstring,
-    is_torchvision_available,
-    is_torchvision_v2_available,
+from ...image_utils import (
+    OPENAI_CLIP_MEAN,
+    OPENAI_CLIP_STD,
+    ChannelDimension,
+    PILImageResampling,
+    SizeDict,
+    pil_torch_interpolation_mapping,
 )
-
-
-if is_torchvision_v2_available():
-    from torchvision.transforms.v2 import functional as F
-
-    from ...image_utils import pil_torch_interpolation_mapping
-elif is_torchvision_available():
-    from torchvision.transforms import functional as F
-
-    from ...image_utils import pil_torch_interpolation_mapping
+from ...processing_utils import Unpack
+from ...utils import TensorType, auto_docstring
 
 
 class DeepseekVLHybridFastImageProcessorKwargs(DefaultFastImageProcessorKwargs):
@@ -86,6 +79,7 @@ class DeepseekVLHybridImageProcessorFast(BaseImageProcessorFast):
     do_resize = True
     do_rescale = True
     do_normalize = True
+    do_pad = True
     valid_kwargs = DeepseekVLHybridFastImageProcessorKwargs
     high_res_image_mean = OPENAI_CLIP_MEAN
     high_res_image_std = OPENAI_CLIP_STD
@@ -111,7 +105,7 @@ class DeepseekVLHybridImageProcessorFast(BaseImageProcessorFast):
         image: "torch.Tensor",
         size: SizeDict,
         min_size: int,
-        interpolation: "F.InterpolationMode" = None,
+        interpolation: Optional["F.InterpolationMode"] = None,
         antialias: bool = True,
         **kwargs,
     ) -> "torch.Tensor":
@@ -147,7 +141,7 @@ class DeepseekVLHybridImageProcessorFast(BaseImageProcessorFast):
             background_color (`int` or `tuple[int, int, int]`, *optional*, defaults to 0):
                 The color to use for the padding. Can be an integer for single channel or a
                 tuple of integers representing for multi-channel images. If passed as integer
-                in mutli-channel mode, it will default to `0` in subsequent channels.
+                in multi-channel mode, it will default to `0` in subsequent channels.
 
         Returns:
             `torch.Tensor`: The padded images.

@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Union
 
 import torch
-import torch.utils.checkpoint
 from torch import nn
 
 from ...activations import ACT2FN
@@ -405,10 +404,6 @@ class GitEncoder(nn.Module):
                 )
                 use_cache = False
 
-        # TODO (joao): remove this exception in v4.56 -- it exists for users that try to pass a legacy cache
-        if not isinstance(past_key_values, (type(None), Cache)):
-            raise ValueError("The `past_key_values` should be either a `Cache` object or `None`.")
-
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache(config=self.config)
 
@@ -658,13 +653,7 @@ class GitVisionAttention(nn.Module):
 
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
-            if self.config._attn_implementation == "sdpa" and output_attentions:
-                logger.warning_once(
-                    "`torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to "
-                    'eager attention. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
-                )
-            else:
-                attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+            attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
         attn_output, attn_weights = attention_interface(
             self,
@@ -965,7 +954,7 @@ class GitModel(GitPreTrainedModel):
         self.visual_projection = GitProjection(config)
 
         if config.num_image_with_embedding is not None:
-            self.img_temperal_embedding = nn.ParameterList(
+            self.img_temporal_embedding = nn.ParameterList(
                 nn.Parameter(torch.zeros(1, 1, config.vision_config.hidden_size))
                 for _ in range(config.num_image_with_embedding)
             )
@@ -1130,7 +1119,7 @@ class GitModel(GitPreTrainedModel):
                     visual_features_frame = self.image_encoder(
                         pixel_values[:, frame_idx, :, :], interpolate_pos_encoding=interpolate_pos_encoding
                     ).last_hidden_state
-                    visual_features_frame += self.img_temperal_embedding[frame_idx]
+                    visual_features_frame += self.img_temporal_embedding[frame_idx]
                     visual_features.append(visual_features_frame)
 
                 # finally, concatenate all features along sequence dimension
@@ -1452,13 +1441,20 @@ class GitForCausalLM(GitPreTrainedModel, GenerationMixin):
         if attention_mask is None:
             attention_mask = input_ids.new_ones(input_shape)
 
-        return {
+        model_inputs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "pixel_values": kwargs.get("pixel_values"),
             "past_key_values": past_key_values,
             "use_cache": use_cache,
         }
+
+        # Forward ALL kwargs that are uninitialized (e.g. `use_cache`).
+        for key, value in kwargs.items():
+            if key not in model_inputs:
+                model_inputs[key] = value
+
+        return model_inputs
 
 
 __all__ = ["GitForCausalLM", "GitModel", "GitPreTrainedModel", "GitVisionModel"]

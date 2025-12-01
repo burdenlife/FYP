@@ -167,7 +167,6 @@ _ftfy_available = _is_package_available("ftfy")
 _g2p_en_available = _is_package_available("g2p_en")
 _hadamard_available = _is_package_available("fast_hadamard_transform")
 _ipex_available, _ipex_version = _is_package_available("intel_extension_for_pytorch", return_version=True)
-_jieba_available = _is_package_available("jieba")
 _jinja_available = _is_package_available("jinja2")
 _kenlm_available = _is_package_available("kenlm")
 _keras_nlp_available = _is_package_available("keras_nlp")
@@ -185,7 +184,7 @@ _auto_round_available, _auto_round_version = _is_package_available("auto_round",
 _auto_awq_available = importlib.util.find_spec("awq") is not None
 _quark_available = _is_package_available("quark")
 _fp_quant_available, _fp_quant_version = _is_package_available("fp_quant", return_version=True)
-_qutlass_available = _is_package_available("qutlass")
+_qutlass_available, _qutlass_version = _is_package_available("qutlass", return_version=True)
 _is_optimum_quanto_available = False
 try:
     importlib.metadata.version("optimum_quanto")
@@ -471,11 +470,7 @@ def is_torchvision_available() -> bool:
 
 
 def is_torchvision_v2_available() -> bool:
-    if not is_torchvision_available():
-        return False
-
-    # NOTE: We require torchvision>=0.15 as v2 transforms are available from this version: https://pytorch.org/vision/stable/transforms.html#v1-or-v2-which-one-should-i-use
-    return version.parse(_torchvision_version) >= version.parse("0.15")
+    return is_torchvision_available()
 
 
 def is_galore_torch_available() -> Union[tuple[bool, str], bool]:
@@ -587,6 +582,23 @@ def is_mamba_2_ssm_available() -> bool:
     return False
 
 
+def is_flash_linear_attention_available():
+    if is_torch_available():
+        import torch
+
+        if not torch.cuda.is_available():
+            return False
+
+        try:
+            import fla
+
+            if version.parse(fla.__version__) >= version.parse("0.2.2"):
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def is_causal_conv1d_available() -> Union[tuple[bool, str], bool]:
     if is_torch_available():
         import torch
@@ -639,6 +651,8 @@ def is_torch_bf16_gpu_available() -> bool:
     if is_torch_mps_available():
         # Note: Emulated in software by Metal using fp32 for hardware without native support (like M1/M2)
         return torch.backends.mps.is_macos_or_newer(14, 0)
+    if is_torch_musa_available():
+        return torch.musa.is_bf16_supported()
     return False
 
 
@@ -719,6 +733,11 @@ def is_torch_tf32_available() -> bool:
 
     import torch
 
+    if is_torch_musa_available():
+        device_info = torch.musa.get_device_properties(torch.musa.current_device())
+        if f"{device_info.major}{device_info.minor}" >= "22":
+            return True
+        return False
     if not torch.cuda.is_available() or torch.version.cuda is None:
         return False
     if torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
@@ -821,7 +840,7 @@ def is_torch_npu_available(check_device=False) -> bool:
 
 
 @lru_cache
-def is_torch_mlu_available(check_device=False) -> bool:
+def is_torch_mlu_available() -> bool:
     """
     Checks if `mlu` is available via an `cndev-based` check which won't trigger the drivers and leave mlu
     uninitialized.
@@ -970,7 +989,7 @@ def is_habana_gaudi1() -> bool:
     if not is_torch_hpu_available():
         return False
 
-    import habana_frameworks.torch.utils.experimental as htexp  # noqa: F401
+    import habana_frameworks.torch.utils.experimental as htexp
 
     # Check if the device is Gaudi1 (vs Gaudi2, Gaudi3)
     return htexp._get_device_type() == htexp.synDeviceType.synDeviceGaudi
@@ -996,7 +1015,7 @@ def is_torchdynamo_compiling() -> Union[tuple[bool, str], bool]:
         return torch.compiler.is_compiling()
     except Exception:
         try:
-            import torch._dynamo as dynamo  # noqa: F401
+            import torch._dynamo as dynamo
 
             return dynamo.is_compiling()
         except Exception:
@@ -1013,7 +1032,7 @@ def is_torchdynamo_exporting() -> bool:
         return torch.compiler.is_exporting()
     except Exception:
         try:
-            import torch._dynamo as dynamo  # noqa: F401
+            import torch._dynamo as dynamo
 
             return dynamo.is_exporting()
         except Exception:
@@ -1352,12 +1371,12 @@ def is_quark_available() -> Union[tuple[bool, str], bool]:
     return _quark_available
 
 
-def is_fp_quant_available() -> bool:
-    return _fp_quant_available and version.parse(_fp_quant_version) >= version.parse("0.1.6")
+def is_fp_quant_available():
+    return _fp_quant_available and version.parse(_fp_quant_version) >= version.parse("0.2.0")
 
 
-def is_qutlass_available() -> Union[tuple[bool, str], bool]:
-    return _qutlass_available
+def is_qutlass_available():
+    return _qutlass_available and version.parse(_qutlass_version) >= version.parse("0.1.0")
 
 
 def is_compressed_tensors_available() -> bool:
@@ -1586,10 +1605,6 @@ def is_jumanpp_available() -> bool:
 
 def is_cython_available() -> bool:
     return importlib.util.find_spec("pyximport") is not None
-
-
-def is_jieba_available() -> Union[tuple[bool, str], bool]:
-    return _jieba_available
 
 
 def is_jinja_available() -> Union[tuple[bool, str], bool]:
@@ -2017,9 +2032,9 @@ CYTHON_IMPORT_ERROR = """
 Cython`. Please note that you may need to restart your runtime after installation.
 """
 
-JIEBA_IMPORT_ERROR = """
-{0} requires the jieba library but it was not found in your environment. You can install it with pip: `pip install
-jieba`. Please note that you may need to restart your runtime after installation.
+RJIEBA_IMPORT_ERROR = """
+{0} requires the rjieba library but it was not found in your environment. You can install it with pip: `pip install
+rjieba`. Please note that you may need to restart your runtime after installation.
 """
 
 PEFT_IMPORT_ERROR = """
@@ -2085,7 +2100,7 @@ BACKENDS_MAPPING = OrderedDict(
         ("accelerate", (is_accelerate_available, ACCELERATE_IMPORT_ERROR)),
         ("oneccl_bind_pt", (is_ccl_available, CCL_IMPORT_ERROR)),
         ("cython", (is_cython_available, CYTHON_IMPORT_ERROR)),
-        ("jieba", (is_jieba_available, JIEBA_IMPORT_ERROR)),
+        ("rjieba", (is_rjieba_available, RJIEBA_IMPORT_ERROR)),
         ("peft", (is_peft_available, PEFT_IMPORT_ERROR)),
         ("jinja", (is_jinja_available, JINJA_IMPORT_ERROR)),
         ("yt_dlp", (is_yt_dlp_available, YT_DLP_IMPORT_ERROR)),
@@ -2451,6 +2466,7 @@ BASE_FILE_REQUIREMENTS = {
     lambda e: e.startswith("tokenization_") and e.endswith("_fast"): ("tokenizers",),
     lambda e: e.startswith("image_processing_") and e.endswith("_fast"): ("vision", "torch", "torchvision"),
     lambda e: e.startswith("image_processing_"): ("vision",),
+    lambda e: e.startswith("video_processing_"): ("vision", "torch", "torchvision"),
 }
 
 

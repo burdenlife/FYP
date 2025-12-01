@@ -404,7 +404,7 @@ def set_module_tensor_to_device(
                     module.weight = module.weight.cuda(device_index)
 
     # clean pre and post forward hook
-    if clear_cache and device != "cpu":
+    if clear_cache and device not in ("cpu", "meta"):
         clear_device_cache()
 
     # When handling tied weights, we update tied_params_map to keep track of the tied weights that have already been allocated on the device in
@@ -476,23 +476,6 @@ def get_non_persistent_buffers(module: nn.Module, recurse: bool = False, fqns: b
                 non_persistent_buffers_set |= m._non_persistent_buffers_set
 
     return non_persistent_buffers_set
-
-
-class FindTiedParametersResult(list):
-    """
-    This is a subclass of a list to handle backward compatibility for Transformers. Do not rely on the fact this is not
-    a list or on the `values` method as in the future this will be removed.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def values(self):
-        warnings.warn(
-            "The 'values' method of FindTiedParametersResult is deprecated and will be removed in Accelerate v1.3.0. ",
-            FutureWarning,
-        )
-        return sum([x[1:] for x in self], [])
 
 
 def check_tied_parameters_in_config(model: nn.Module):
@@ -568,7 +551,7 @@ def check_tied_parameters_on_same_device(tied_params, device_map):
             )
 
 
-def find_tied_parameters(model: torch.nn.Module, **kwargs):
+def find_tied_parameters(model: torch.nn.Module, **kwargs) -> list[list[str]]:
     """
     Find the tied parameters in a given model.
 
@@ -620,7 +603,7 @@ def find_tied_parameters(model: torch.nn.Module, **kwargs):
                     tied_param_groups[param_name] = []
                 tied_param_groups[param_name].append(tied_param_name)
 
-    return FindTiedParametersResult([sorted([weight] + list(set(tied))) for weight, tied in tied_param_groups.items()])
+    return [sorted([weight] + list(set(tied))) for weight, tied in tied_param_groups.items()]
 
 
 def retie_parameters(model, tied_params):
@@ -1041,7 +1024,8 @@ def get_balanced_memory(
 
     # Compute mean of final modules. In the first dict of module sizes, leaves are the parameters
     leaves = get_module_leaves(module_sizes)
-    module_sizes = {n: v for n, v in module_sizes.items() if n not in leaves}
+    leaves_set = set(leaves)  # Convert to set for O(1) membership testing
+    module_sizes = {n: v for n, v in module_sizes.items() if n not in leaves_set}
     # Once removed, leaves are the final modules.
     leaves = get_module_leaves(module_sizes)
     mean_leaves = int(sum([module_sizes[n] for n in leaves]) / max(len(leaves), 1))
@@ -1809,7 +1793,7 @@ def load_checkpoint_in_model(
     dtype: Optional[Union[str, torch.dtype]] = None,
     offload_state_dict: bool = False,
     offload_buffers: bool = False,
-    keep_in_fp32_modules: list[str] = None,
+    keep_in_fp32_modules: Optional[list[str]] = None,
     offload_8bit_bnb: bool = False,
     strict: bool = False,
     full_state_dict: bool = True,
@@ -2136,6 +2120,10 @@ def get_grad_scaler(distributed_type: DistributedType = None, **kwargs):
         return torch.amp.GradScaler("hpu", **kwargs)
     elif is_xpu_available():
         return torch.amp.GradScaler("xpu", **kwargs)
+    elif is_mps_available():
+        if not is_torch_version(">=", "2.8.0"):
+            raise ValueError("Grad Scaler with MPS device requires a Pytorch >= 2.8.0")
+        return torch.amp.GradScaler("mps", **kwargs)
     else:
         if is_torch_version(">=", "2.3"):
             return torch.amp.GradScaler("cuda", **kwargs)

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 def load_and_quantize_model(
     model: torch.nn.Module,
     bnb_quantization_config: BnbQuantizationConfig,
-    weights_location: Union[str, os.PathLike] = None,
+    weights_location: Optional[Union[str, os.PathLike]] = None,
     device_map: Optional[dict[str, Union[int, str, torch.device]]] = None,
     no_split_module_classes: Optional[list[str]] = None,
     max_memory: Optional[dict[Union[int, str], Union[int, str]]] = None,
@@ -314,7 +314,7 @@ def _replace_with_bnb_layers(
     """
     Private method that wraps the recursion for module replacement.
 
-    Returns the converted model and a boolean that indicates if the conversion has been successfull or not.
+    Returns the converted model and a boolean that indicates if the conversion has been successful or not.
     """
     # bitsandbytes will initialize CUDA on import, so it needs to be imported lazily
     import bitsandbytes as bnb

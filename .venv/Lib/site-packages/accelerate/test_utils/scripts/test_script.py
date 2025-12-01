@@ -28,29 +28,24 @@ from torch.utils.data import DataLoader, Dataset
 from accelerate import Accelerator
 from accelerate.data_loader import SeedableRandomSampler, prepare_data_loader
 from accelerate.state import AcceleratorState
-from accelerate.test_utils import RegressionDataset, are_the_same_tensors
+from accelerate.test_utils import RegressionDataset, RegressionModel, are_the_same_tensors
 from accelerate.utils import (
     DataLoaderConfiguration,
     DistributedType,
     gather,
     gather_object,
     is_bf16_available,
+    is_cuda_available,
     is_datasets_available,
     is_fp16_available,
     is_hpu_available,
     is_ipex_available,
+    is_mps_available,
     is_pytest_available,
-    is_xpu_available,
     set_seed,
     synchronize_rng_states,
 )
 
-
-# TODO: remove RegressionModel4XPU once ccl support empty buffer in broadcasting.
-if is_xpu_available():
-    from accelerate.test_utils import RegressionModel4XPU as RegressionModel
-else:
-    from accelerate.test_utils import RegressionModel
 
 if is_hpu_available():
     ATOL = 1e-3
@@ -534,7 +529,7 @@ def training_check(use_seedable_sampler=False):
     accelerator.print("Training yielded the same results on one CPU or distributed setup with batch split.")
 
     # FP32 wrapper check
-    if torch.cuda.is_available():
+    if is_cuda_available() or is_mps_available():
         # Mostly a test that model.forward will have autocast when running unwrap_model(model, keep_fp32_wrapper=True)
         print("Keep fp32 wrapper check.")
         AcceleratorState._reset_state()

@@ -53,13 +53,14 @@ from .testing import (
     require_torchvision,
     require_tpu,
     require_transformer_engine,
+    require_transformer_engine_mxfp8,
     require_xpu,
     run_first,
     skip,
     slow,
     torch_device,
 )
-from .training import RegressionDataset, RegressionModel, RegressionModel4XPU
+from .training import RegressionDataset, RegressionModel
 
 
 from .scripts import test_script, test_sync, test_ops  # isort: skip

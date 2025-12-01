@@ -21,7 +21,6 @@ import math
 import os
 import re
 import shutil
-import sys
 import warnings
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -568,22 +567,18 @@ class Accelerator:
             and self.distributed_type not in (DistributedType.DEEPSPEED, DistributedType.MEGATRON_LM)
         ):
             self.native_amp = True
-            if self.device.type not in (
-                "xpu",
-                "cuda",
-                "npu",
-                "xla",
-                "mlu",
-                "musa",
-                "hpu",
-                "sdaa",
-            ) or is_torch_xla_available(check_is_tpu=True):
-                raise ValueError(f"fp16 mixed precision requires a GPU (not {self.device.type!r}).")
+            supported_device = ("xpu", "cuda", "npu", "xla", "mlu", "musa", "hpu", "sdaa", "mps")
+            if self.device.type not in supported_device or is_torch_xla_available(check_is_tpu=True):
+                raise ValueError(
+                    f"fp16 mixed precision requires a device in {supported_device} (not {self.device.type!r})."
+                )
+            if self.device.type == "mps" and not is_torch_version(">=", "2.5.0"):
+                raise ValueError("fp16 mixed precision with MPS device requires a Pytorch >= 2.5.0")
             kwargs = self.scaler_handler.to_kwargs() if self.scaler_handler is not None else {}
 
             # FSDP2 doesn't use ShardedGradScaler, don't want to modify `get_grad_scaler`, rather create a simple utility
             if self.is_fsdp2:
-                self.scaler = get_fsdp2_grad_scaler(**kwargs)
+                self.scaler = get_fsdp2_grad_scaler(device=self.device.type, **kwargs)
             else:
                 self.scaler = get_grad_scaler(self.distributed_type, **kwargs)
 
@@ -595,8 +590,10 @@ class Accelerator:
                 self.native_amp = True
             else:
                 self.native_amp = is_bf16_available(True)
-            if mixed_precision == "bf16" and not self.native_amp and not is_torch_xla_available():
+            if not self.native_amp and not is_torch_xla_available():
                 raise ValueError("bf16 mixed precision requires PyTorch >= 1.10 and a supported device.")
+            if self.native_amp and self.device.type == "mps" and not is_torch_version(">=", "2.6.0"):
+                raise ValueError("bf16 mixed precision with MPS device requires a Pytorch >= 2.6.0")
 
         # for DeepSpeed,  self.state.mixed_precision is always "bf16",
         # see https://github.com/huggingface/accelerate/blob/main/src/accelerate/state.py#L968 and
@@ -873,7 +870,7 @@ class Accelerator:
         with PartialState().split_between_processes(inputs, apply_padding=apply_padding) as inputs:
             yield inputs
 
-    def on_main_process(self, function: Callable[..., Any] = None):
+    def on_main_process(self, function: Callable[..., Any] | None = None):
         """
         A decorator that will run the decorated function on the main process only. Can also be called using the
         `PartialState` class.
@@ -912,7 +909,7 @@ class Accelerator:
 
         return _inner
 
-    def on_local_main_process(self, function: Callable[..., Any] = None):
+    def on_local_main_process(self, function: Callable[..., Any] | None = None):
         """
         A decorator that will run the decorated function on the local main process only. Can also be called using the
         `PartialState` class.
@@ -993,7 +990,7 @@ class Accelerator:
 
         return _inner
 
-    def on_process(self, function: Callable[..., Any] = None, process_index: int = None):
+    def on_process(self, function: Callable[..., Any] | None = None, process_index: int | None = None):
         """
         A decorator that will run the decorated function on a given process index only. Can also be called using the
         `PartialState` class.
@@ -1038,7 +1035,7 @@ class Accelerator:
 
         return _inner
 
-    def on_local_process(self, function: Callable[..., Any] = None, local_process_index: int = None):
+    def on_local_process(self, function: Callable[..., Any] | None = None, local_process_index: int | None = None):
         """
         A decorator that will run the decorated function on a given local process index only. Can also be called using
         the `PartialState` class.
@@ -1164,13 +1161,20 @@ class Accelerator:
         >>> optimizer.zero_grad()
         ```
         """
-        context = contextlib.nullcontext
-        if self.use_distributed:
-            if self.distributed_type != DistributedType.DEEPSPEED or self.state.deepspeed_plugin.zero_stage < 2:
-                context = getattr(model, "no_sync", context)
+        if self.is_fsdp2:
+            model.set_requires_gradient_sync(False)
+            try:
+                yield
+            finally:
+                model.set_requires_gradient_sync(True)
+        else:
+            context = contextlib.nullcontext
+            if self.use_distributed:
+                if self.distributed_type != DistributedType.DEEPSPEED or self.state.deepspeed_plugin.zero_stage < 2:
+                    context = getattr(model, "no_sync", context)
 
-        with context():
-            yield
+            with context():
+                yield
 
     @staticmethod
     @contextmanager
@@ -1315,7 +1319,7 @@ class Accelerator:
 
         <Tip warning={true}>
 
-        Overidding `even_batches` will not affect iterable-style data loaders.
+        Overriding `even_batches` will not affect iterable-style data loaders.
 
         </Tip>
 
@@ -1351,7 +1355,7 @@ class Accelerator:
 
                 if iterable_dl_seen:
                     warnings.warn(
-                        "Overridding even_batches is only supported for map-style datasets, yet some dataloaders given were iterable"
+                        "Overriding even_batches is only supported for map-style datasets, yet some dataloaders given were iterable"
                     )
             else:
                 even_batches = self.even_batches
@@ -1530,7 +1534,7 @@ class Accelerator:
                 and self.state.use_ipex
             ):
                 logger.warning(
-                    "You are using lower version of PyTorch(< 2.7.0) with ipex acceleration on Intel CPU or XPU, Intel has upstreamed most of the optimizations into stock PyTorch from 2.7.0, we enourage you to install the latest stock PyTorch and enjoy the out-of-experience on Intel CPU/XPU."
+                    "You are using lower version of PyTorch(< 2.7.0) with ipex acceleration on Intel CPU or XPU, Intel has upstreamed most of the optimizations into stock PyTorch from 2.7.0, we encourage you to install the latest stock PyTorch and enjoy the out-of-experience on Intel CPU/XPU."
                 )
                 args = self._prepare_ipex(*args)
         if self.parallelism_config and self.parallelism_config.tp_enabled:
@@ -1586,6 +1590,8 @@ class Accelerator:
 
         device_mesh = self.torch_device_mesh
 
+        old_named_params = fsdp2_canonicalize_names(self._get_named_parameters(*tuple(result), drop_refs=True))
+
         for arg in result:
             if not isinstance(arg, torch.nn.Module):
                 continue
@@ -1609,9 +1615,31 @@ class Accelerator:
                     dp = torch.nn.Parameter(dp, requires_grad=param.requires_grad)
                 setattr(module_to_tp, param_type, dp)
 
+        new_named_params = fsdp2_canonicalize_names(self._get_named_parameters(*tuple(result), drop_refs=False))
+        # Build a map from old to new params
+        mapping = {p: new_named_params[n] for n, p in old_named_params.items()}
+
+        def _get_tensor_address(p):
+            if isinstance(p, DTensor):
+                return p._local_tensor.data_ptr()
+            return p.data_ptr()
+
+        for obj in result:
+            if isinstance(obj, torch.optim.Optimizer):
+                for param_group in obj.param_groups:
+                    # Each param_group originally maps to model parameters (e.g., from model.parameters()).
+                    # After _prepare_tp(), parameter references are replaced with DTensor instances.
+                    # Therefore, we remap the parameter references to their new DTensor addresses
+                    # so that the optimizer can correctly update the model parameters.
+                    param_group["params"] = [mapping[_get_tensor_address(p)] for p in param_group["params"]]
+
         return args
 
     def _prepare_cp(self, *args):
+        if self.parallelism_config.sp_backend == "deepspeed":
+            # deepspeed handles cp in a different way, configured in _prepare_deepspeed
+            return args
+
         from torch.distributed.tensor.experimental import context_parallel
         from torch.distributed.tensor.experimental._attention import set_rotate_method
 
@@ -1660,7 +1688,7 @@ class Accelerator:
             else:
                 model = torch.compile(model, **self.state.dynamo_plugin.to_kwargs())
 
-        # Get old params and canonicalize - we cannonicalize to have the mapping easy
+        # Get old params and canonicalize - we canonicalize to have the mapping easy
         old_named_params = fsdp2_canonicalize_names(self._get_named_parameters(*tuple(result), drop_refs=True))
 
         # Swap the optimizer parameters with empty, so `fully_shard` after will not allocate too much memory
@@ -1700,7 +1728,9 @@ class Accelerator:
 
         return result
 
-    def prepare_model(self, model: torch.nn.Module, device_placement: bool = None, evaluation_mode: bool = False):
+    def prepare_model(
+        self, model: torch.nn.Module, device_placement: bool | None = None, evaluation_mode: bool = False
+    ):
         """
         Prepares a PyTorch model for training in any distributed setup. It is recommended to use
         [`Accelerator.prepare`] instead.
@@ -2069,6 +2099,11 @@ class Accelerator:
 
         is_dataloader_present = any(isinstance(obj, torch.utils.data.DataLoader) for obj in args)
         tp_size = deepspeed_plugin.deepspeed_config.get("tensor_parallel", {}).get("autotp_size", 0)
+
+        sp_backend = self.parallelism_config.sp_backend if self.parallelism_config else None
+        sp_size = self.parallelism_config.sp_size if self.parallelism_config else 1
+        sp_handler = self.parallelism_config.sp_handler if self.parallelism_config else None
+
         if tp_size > 1:
             if not compare_versions("deepspeed", ">=", "0.16.4"):
                 raise ImportError(
@@ -2136,11 +2171,14 @@ class Accelerator:
             "gradient_clipping": 1.0,
             "zero_optimization.stage3_gather_16bit_weights_on_model_save": False,
         }
-        # This is skipped when preparing just a model
+        # This block is skipped when preparing just a model and DL is absent from current call's args
         if batch_size_per_device is not None:
             config_kwargs["train_micro_batch_size_per_gpu"] = batch_size_per_device
             config_kwargs["train_batch_size"] = (
-                batch_size_per_device * deepspeed_plugin.get_value("gradient_accumulation_steps") * self.num_processes
+                batch_size_per_device
+                * deepspeed_plugin.get_value("gradient_accumulation_steps")
+                * self.num_processes
+                // sp_size
             )
 
         model = None
@@ -2258,8 +2296,19 @@ class Accelerator:
                         if not self.split_batches
                         else scheduler.total_num_steps
                     )
+
             deepspeed_plugin.deepspeed_config_process(must_match=False, **config_kwargs)
             self.deepspeed_config = deepspeed_plugin.deepspeed_config
+
+            # note: batch_size derivation is all over the map, especiall in HF Trainer, so try to fix it at the last moment if needed
+            pc = self.parallelism_config
+            if pc is not None and pc.sp_backend == "deepspeed" and pc.sp_size > 1:
+                self.deepspeed_config["train_batch_size"] = (
+                    self.deepspeed_config["train_micro_batch_size_per_gpu"]
+                    * self.deepspeed_config["gradient_accumulation_steps"]
+                    * pc.data_parallel_size
+                )
+
             kwargs = dict(model=model, config_params=self.deepspeed_config)
             if optimizer is not None:
                 if isinstance(optimizer, (DummyOptim)):
@@ -2286,6 +2335,54 @@ class Accelerator:
                 # This env variable is initialized here to make sure it is set to "true"
                 # It should be done by the launcher but it does not work for multi-node runs
                 os.environ["DEEPSPEED_USE_HPU"] = "true"
+
+            mpu = None
+            if sp_size > 1:
+                if sp_backend != "deepspeed":
+                    raise ValueError(
+                        f"In order to use the configured {sp_size=} with DeepSpeed, you need to configure sp_backend='deepspeed', yet you configured it to be {sp_backend=}."
+                    )
+
+                ver_min_required = "0.18.2"
+                if not compare_versions("deepspeed", ">=", ver_min_required):
+                    raise ImportError(
+                        f"Deepspeed ALST/Ulysses requires deepspeed>={ver_min_required}. Please update DeepSpeed via `pip install deepspeed -U`."
+                    )
+
+                from deepspeed.runtime.sequence_parallel.ulysses_sp import (
+                    UlyssesSPAttentionHF,
+                    UlyssesSPDataLoaderAdapter,
+                )
+
+                if not hasattr(model, "config"):
+                    raise ValueError(
+                        "UlyssesSPAttentionHF currently works with HF Transformers and expects the model object to have a config attribute but this model doesn't have one."
+                    )
+
+                mpu = UlyssesSPAttentionHF.register_with_transformers(
+                    model_name_or_path=model,
+                    sequence_parallel_size=sp_size,
+                    seq_length=sp_handler.sp_seq_length,
+                    seq_length_is_variable=sp_handler.sp_seq_length_is_variable,
+                    core_attn_implementation=sp_handler.sp_attn_implementation,
+                    micro_batch_size=batch_size_per_device,
+                )
+                kwargs["mpu"] = mpu
+
+                for i in range(len(result)):
+                    if isinstance(result[i], torch.utils.data.DataLoader):
+                        if sp_size > 1:
+                            # note that in case dataloader was prepared apart from model (for the external accelerator.prepare call) you'd need to call deepspeed_ulysses_dl_adapter after prepare(model) (see HF Trainer as the use-case)
+                            sp_group = mpu.get_sequence_parallel_group()
+                            sp_world_size = mpu.get_sequence_parallel_world_size()
+                            sp_rank = mpu.get_sequence_parallel_rank()
+                            result[i] = UlyssesSPDataLoaderAdapter(
+                                result[i],
+                                sp_rank=sp_rank,
+                                sp_group=sp_group,
+                                sp_world_size=sp_world_size,
+                                device=self.device,  # model.device,
+                            )
 
             engine, optimizer, _, lr_scheduler = ds_initialize(**kwargs)
 
@@ -2317,6 +2414,7 @@ class Accelerator:
                     type(result[i]).__name__ in deepspeed.runtime.lr_schedules.VALID_LR_SCHEDULES
                 ):
                     result[i] = scheduler
+
             # pointing for deepspeed_engine_wrapped.backward()
             if self.deepspeed_engine_wrapped is None:
                 self.deepspeed_engine_wrapped = DeepSpeedEngineWrapper(engine)
@@ -2332,6 +2430,26 @@ class Accelerator:
             if scheduler is not None:
                 self._schedulers.append(scheduler)
         return tuple(result)
+
+    def deepspeed_ulysses_dl_adapter(self, dl, model):
+        """this is normally called as part of `prepare` but when dataloader was prepared apart from model (for the external accelerator.prepare call) this additional call needs to be made after prepare(model) (see HF Trainer as the use-case)"""
+        sp_size = self.parallelism_config.sp_size if self.parallelism_config else 1
+        if sp_size == 1:
+            return dl
+        from deepspeed.runtime.sequence_parallel.ulysses_sp import UlyssesSPDataLoaderAdapter
+        from deepspeed.utils import groups
+
+        sp_group = groups._get_sequence_parallel_group()
+        sp_world_size = groups._get_sequence_parallel_world_size()
+        sp_rank = groups._get_sequence_parallel_rank()
+        dl = UlyssesSPDataLoaderAdapter(
+            dl,
+            sp_rank=sp_rank,
+            sp_group=sp_group,
+            sp_world_size=sp_world_size,
+            device=model.device,
+        )
+        return dl
 
     def _prepare_megatron_lm(self, *args):
         megatron_lm_plugin = self.state.megatron_lm_plugin
@@ -2876,7 +2994,7 @@ class Accelerator:
                     while isinstance(opt, AcceleratedOptimizer):
                         opt = opt.optimizer
                     gradients = xm._fetch_gradients(opt)
-                    # Use xm.all_reduce to perform an in-place all-reduce. Recusrsive all-reduce each tensor
+                    # Use xm.all_reduce to perform an in-place all-reduce. Recursive all-reduce each tensor
                     # one by one in self.reduce is non-inplace.
                     xm.all_reduce("sum", gradients, scale=1.0 / self.num_processes)
                     # Set is_xla_gradients_synced to True to avoid all-reduce twice in the AcceleratedOptimizer step.
@@ -2941,7 +3059,7 @@ class Accelerator:
         >>> from accelerate import Accelerator
 
         >>> accelerator = Accelerator()
-        >>> process_tensor = torch.tensor([accelerator.process_index])
+        >>> process_tensor = torch.tensor([accelerator.process_index], device=accelerator.device)
         >>> gathered_tensor = accelerator.gather(process_tensor)
         >>> gathered_tensor
         tensor([0, 1, 2, 3])
@@ -3035,7 +3153,7 @@ class Accelerator:
             reduction (`str`, *optional*, defaults to "sum"):
                 A reduction type, can be one of 'sum', 'mean', or 'none'. If 'none', will not perform any operation.
             scale (`float`, *optional*, defaults to 1.0):
-                A default scaling value to be applied after the reduce, only valied on XLA.
+                A default scaling value to be applied after the reduce, only valid on XLA.
 
         Returns:
             `torch.Tensor`, or a nested tuple/list/dictionary of `torch.Tensor`:
@@ -3327,7 +3445,7 @@ class Accelerator:
 
         Arguments:
             model: (`torch.nn.Module`):
-                Model to be saved. The model can be wrapped or unwraped.
+                Model to be saved. The model can be wrapped or unwrapped.
             save_directory (`str` or `os.PathLike`):
                 Directory to which to save. Will be created if it doesn't exist.
             max_shard_size (`int` or `str`, *optional*, defaults to `"10GB"`):
@@ -3438,7 +3556,7 @@ class Accelerator:
 
         `hook(models: list[torch.nn.Module], weights: list[dict[str, torch.Tensor]], input_dir: str) -> None`
 
-        The `models` argument are the models as saved in the accelerator state under `accelerator._models`, `weigths`
+        The `models` argument are the models as saved in the accelerator state under `accelerator._models`, `weights`
         argument are the state dicts of the `models`, and the `input_dir` argument is the `input_dir` argument passed
         to [`Accelerator.load_state`].
 
@@ -3458,7 +3576,7 @@ class Accelerator:
         self._save_model_state_pre_hook[handle.id] = hook
         return handle
 
-    def save_state(self, output_dir: str = None, safe_serialization: bool = True, **save_model_func_kwargs):
+    def save_state(self, output_dir: str | None = None, safe_serialization: bool = True, **save_model_func_kwargs):
         """
         Saves the current states of the model, optimizer, scaler, RNG generators, and registered objects to a folder.
 
@@ -3624,7 +3742,7 @@ class Accelerator:
         self._load_model_state_pre_hook[handle.id] = hook
         return handle
 
-    def load_state(self, input_dir: str = None, load_kwargs: dict | None = None, **load_model_func_kwargs):
+    def load_state(self, input_dir: str | None = None, load_kwargs: dict | None = None, **load_model_func_kwargs):
         """
         Loads the current states of the model, optimizer, scaler, RNG generators, and registered objects.
 
@@ -3904,9 +4022,10 @@ class Accelerator:
             tp_sharding = self.deepspeed_config.get("tensor_parallel", {}).get("autotp_size", 0) > 1
             if zero3_sharding or tp_sharding:
                 if model.zero_gather_16bit_weights_on_model_save():
-                    if tp_sharding and not compare_versions("deepspeed", ">=", "0.16.4"):
+                    ver_min_required = "0.16.4"
+                    if tp_sharding and not compare_versions("deepspeed", ">=", ver_min_required):
                         raise ImportError(
-                            "Deepspeed TP requires deepspeed >= 0.16.4, Please update DeepSpeed via `pip install deepspeed -U`."
+                            f"Deepspeed TP requires deepspeed>={ver_min_required}. Please update DeepSpeed via `pip install deepspeed -U`."
                         )
                     state_dict = (
                         model._consolidated_16bit_state_dict()
@@ -4003,7 +4122,7 @@ class Accelerator:
 
         <Tip warning={true}>
 
-        `context_parallel` is currently only supported together with FSDP2, and requires `parallelism_config.cp_size` >
+        `context_parallel` is currently supported with FSDP2 and requires `parallelism_config.cp_size` >
         1. If either of these conditions are not met, this context manager will have no effect, though to enable fewer
         code changes it will not raise an Exception.
 
@@ -4030,7 +4149,11 @@ class Accelerator:
         """
         # We don't need to check FSDP2 as parallelism_config does that for us
         # Invariant: in this branch self._cp_context is set, as it was set by `self._prepare_cp`
-        if self.parallelism_config and self.parallelism_config.cp_enabled:
+        if (
+            self.parallelism_config
+            and self.parallelism_config.cp_backend == "torch"
+            and self.parallelism_config.cp_enabled
+        ):
             with self._cp_context(
                 buffers=buffers, buffer_seq_dims=buffer_seq_dims, no_restore_buffers=no_restore_buffers
             ):
@@ -4064,10 +4187,8 @@ class Accelerator:
         if autocast_handler is None:
             autocast_handler = self.autocast_handler
         autocast_context = get_mixed_precision_context_manager(self.native_amp, autocast_handler)
-        autocast_context.__enter__()
-        # TODO: should the `yield` be in a try/finally block?
-        yield
-        autocast_context.__exit__(*sys.exc_info())
+        with autocast_context:
+            yield
 
     @contextmanager
     def profile(self, profile_handler: ProfileKwargs | None = None):

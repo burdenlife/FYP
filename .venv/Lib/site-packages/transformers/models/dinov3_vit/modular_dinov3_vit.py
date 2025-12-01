@@ -19,7 +19,6 @@ from typing import Callable, Optional
 
 import numpy as np
 import torch
-import torch.utils.checkpoint
 from torch import nn
 
 from transformers.models.arcee.modeling_arcee import ArceeMLP
@@ -390,7 +389,7 @@ class DINOv3ViTModel(DINOv3ViTPreTrainedModel):
     def get_input_embeddings(self):
         return self.embeddings.patch_embeddings
 
-    @check_model_inputs
+    @check_model_inputs(tie_last_hidden_states=False)
     @auto_docstring
     def forward(
         self,

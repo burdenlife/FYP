@@ -222,7 +222,7 @@ class TvltImageProcessor(BaseImageProcessor):
         image: ImageInput,
         do_resize: Optional[bool] = None,
         size: Optional[dict[str, int]] = None,
-        resample: PILImageResampling = None,
+        resample: Optional[PILImageResampling] = None,
         do_center_crop: Optional[bool] = None,
         crop_size: Optional[dict[str, int]] = None,
         do_rescale: Optional[bool] = None,
@@ -281,7 +281,7 @@ class TvltImageProcessor(BaseImageProcessor):
         size: Optional[dict[str, int]] = None,
         patch_size: Optional[list[int]] = None,
         num_frames: Optional[int] = None,
-        resample: PILImageResampling = None,
+        resample: Optional[PILImageResampling] = None,
         do_center_crop: Optional[bool] = None,
         crop_size: Optional[dict[str, int]] = None,
         do_rescale: Optional[bool] = None,
@@ -395,7 +395,7 @@ class TvltImageProcessor(BaseImageProcessor):
                     f"number of frames must not be greater than the maximum frames of the model {self.num_frames}."
                 )
 
-        max_num_frames = max([len(video) for video in videos])
+        max_num_frames = max(len(video) for video in videos)
         num_patches_per_image = (size["shortest_edge"] // patch_size[0]) ** 2
         video_masks = np.array(
             [

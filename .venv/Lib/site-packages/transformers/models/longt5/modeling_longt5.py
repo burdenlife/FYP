@@ -250,7 +250,7 @@ class LongT5LayerNorm(nn.Module):
 try:
     from apex.normalization import FusedRMSNorm
 
-    LongT5LayerNorm = FusedRMSNorm  # noqa
+    LongT5LayerNorm = FusedRMSNorm
 
     logger.info("Discovered apex.normalization.FusedRMSNorm - will use it instead of LongT5LayerNorm")
 except ImportError:
@@ -470,7 +470,8 @@ class LongT5Attention(nn.Module):
         query_states = query_states.view(batch_size, -1, self.n_heads, self.key_value_proj_dim).transpose(1, 2)
 
         # Check is encoder-decoder model is being used. Otherwise we'll get `DynamicCache`
-        if past_key_values is not None and isinstance(past_key_values, EncoderDecoderCache):
+        is_updated = False
+        if isinstance(past_key_values, EncoderDecoderCache):
             is_updated = past_key_values.is_updated.get(self.layer_idx)
             if is_cross_attention:
                 # after the first generated id, we can subsequently re-use all key/value_states from cache
@@ -498,7 +499,7 @@ class LongT5Attention(nn.Module):
                     key_states, value_states, self.layer_idx, {"cache_position": cache_position}
                 )
                 # set flag that curr layer for cross-attn is already updated so we can re-use in subsequent calls
-                if is_cross_attention:
+                if is_cross_attention and isinstance(past_key_values, EncoderDecoderCache):
                     past_key_values.is_updated[self.layer_idx] = True
 
         # compute scores, equivalent of torch.einsum("bnqd,bnkd->bnqk", query_states, key_states), compatible with onnx op>9
@@ -1268,6 +1269,35 @@ class LongT5PreTrainedModel(PreTrainedModel):
             "decoder_attention_mask": input_mask,
         }
         return dummy_inputs
+
+    def _try_load_missing_tied_module(self, key):
+        module = self
+        key = key.removesuffix(".weight")
+        for sub_key in key.split("."):
+            if not hasattr(module, sub_key):
+                return
+            module = getattr(module, sub_key)
+
+        self._tie_or_clone_weights(module, self.shared)
+
+    @classmethod
+    def from_pretrained(self, *args, **kwargs):
+        requested_loading_info = kwargs.get("output_loading_info", False)
+        kwargs["output_loading_info"] = True
+        model, loading_info = super().from_pretrained(*args, **kwargs)
+        missing_keys = loading_info.get("missing_keys", [])
+
+        if hasattr(model, "shared") and hasattr(model, "_tied_weights_keys"):
+            for missing_key in missing_keys:
+                logger.warning(
+                    f"Recovering a missing tied weight {missing_key} from a legacy LongT5 checkpoint. "
+                    f"Consider saving {missing_key} in your checkpoint or updating the config (tie_word_embeddings=true)."
+                )
+                model._try_load_missing_tied_module(missing_key)
+
+        if requested_loading_info:
+            return model, loading_info
+        return model
 
     def _init_weights(self, module):
         """Initialize the weights"""

@@ -195,7 +195,7 @@ class PartialState:
             original_backend = kwargs.pop("backend", None)
             backend, distributed_type = self._prepare_backend(cpu, use_sagemaker_dp, original_backend)
             if original_backend is not None and backend != original_backend:
-                raise ValueError(f"Your assigned backend {original_backend} is not avaliable, please use {backend}")
+                raise ValueError(f"Your assigned backend {original_backend} is not available, please use {backend}")
             self.backend = backend
             self.distributed_type = distributed_type
             use_deepspeed = False
@@ -400,7 +400,7 @@ class PartialState:
             DistributedType.DEEPSPEED,
             DistributedType.FSDP,
         ):
-            torch.distributed.barrier()
+            torch.distributed.barrier(device_ids=[self.local_process_index])
         elif self.distributed_type == DistributedType.XLA:
             xm.rendezvous("accelerate.utils.wait_for_everyone")
 
@@ -546,7 +546,7 @@ class PartialState:
         """
         yield from self._goes_first(self.is_local_main_process)
 
-    def on_main_process(self, function: Callable[..., Any] = None):
+    def on_main_process(self, function: Callable[..., Any] | None = None):
         """
         Decorator that only runs the decorated function on the main process.
 
@@ -576,7 +576,7 @@ class PartialState:
             return function
         return do_nothing
 
-    def on_local_main_process(self, function: Callable[..., Any] = None):
+    def on_local_main_process(self, function: Callable[..., Any] | None = None):
         """
         Decorator that only runs the decorated function on the local main process.
 
@@ -635,7 +635,7 @@ class PartialState:
             return function
         return do_nothing
 
-    def on_process(self, function: Callable[..., Any] = None, process_index: int = None):
+    def on_process(self, function: Callable[..., Any] | None = None, process_index: int | None = None):
         """
         Decorator that only runs the decorated function on the process with the given index.
 
@@ -668,7 +668,7 @@ class PartialState:
             return function
         return do_nothing
 
-    def on_local_process(self, function: Callable[..., Any] = None, local_process_index: int = None):
+    def on_local_process(self, function: Callable[..., Any] | None = None, local_process_index: int | None = None):
         """
         Decorator that only runs the decorated function on the process with the given index on the current node.
 
@@ -744,7 +744,7 @@ class PartialState:
             return torch.device("cpu")
 
     def _prepare_backend(
-        self, cpu: bool = False, sagemaker_dp=False, backend: str = None
+        self, cpu: bool = False, sagemaker_dp=False, backend: str | None = None
     ) -> tuple[str, DistributedType]:
         "Prepares any imports needed before initializing the distributed backend and sets `self.backend` properly"
         distributed_type = None
@@ -894,7 +894,7 @@ class AcceleratorState:
 
     def __init__(
         self,
-        mixed_precision: str = None,
+        mixed_precision: str | None = None,
         cpu: bool = False,
         dynamo_plugin=None,
         deepspeed_plugin=None,
@@ -949,8 +949,13 @@ class AcceleratorState:
                     "Please make sure to properly initialize your accelerator via `accelerator = Accelerator()` "
                     "before using any functionality from the `accelerate` library."
                 )
-            # deepspeed handles mixed_precision using deepspeed_config
-            self._mixed_precision = "no" if self.distributed_type == DistributedType.DEEPSPEED else mixed_precision
+            # deepspeed handles mixed_precision using deepspeed_config. But we need to set it to fp8
+            # if we're using fp8.
+            if self.distributed_type == DistributedType.DEEPSPEED and mixed_precision != "fp8":
+                self._mixed_precision = "no"
+            else:
+                self._mixed_precision = mixed_precision
+
             if self.distributed_type == DistributedType.XLA and is_torch_xla_available(check_is_tpu=True):
                 if mixed_precision == "bf16":
                     if os.environ.get("ACCELERATE_DOWNCAST_BF16"):
@@ -986,7 +991,7 @@ class AcceleratorState:
                 if not os.environ.get("ACCELERATE_ALLOW_CP_STANDALONE", "false").lower() == "true":
                     if self.parallelism_config and self.parallelism_config.cp_enabled and fsdp_plugin is None:
                         raise ValueError(
-                            "`cp_size > 1` specified in the `parallelism_config`, but no `fsdp_plugin` was provided. We need a `fsdp_plugin` to use context parallelism, as we also shard the model across the device mesh to save more memory"
+                            "`cp_size > 1` specified in the `parallelism_config`, but no `fsdp_plugin` was provided. We need a `fsdp_plugin` to use context parallelism with `cp_backend=torch`, as we also shard the model across the device mesh to save more memory"
                         )
                     if (
                         self.parallelism_config is not None
@@ -1056,7 +1061,7 @@ class AcceleratorState:
 
     @property
     def mixed_precision(self):
-        if self.distributed_type == DistributedType.DEEPSPEED:
+        if self.distributed_type == DistributedType.DEEPSPEED and self._mixed_precision != "fp8":
             config = self.deepspeed_plugin.deepspeed_config
             if config.get("fp16", {}).get("enabled", False):
                 mixed_precision = "fp16"
@@ -1079,7 +1084,7 @@ class AcceleratorState:
         """
         Destroys the process group. If one is not specified, the default process group is destroyed.
 
-        If `self.fork_lauched` is `True` and `group` is `None`, nothing happens.
+        If `self.fork_launched` is `True` and `group` is `None`, nothing happens.
         """
         PartialState().destroy_process_group(group)
 
@@ -1200,7 +1205,7 @@ class AcceleratorState:
         return self.deepspeed_plugins[name]
 
     @deepspeed_required
-    def select_deepspeed_plugin(self, name: str = None):
+    def select_deepspeed_plugin(self, name: str | None = None):
         """
         Activates the DeepSpeedPlugin with the given `name`, and will disable all other plugins.
         """

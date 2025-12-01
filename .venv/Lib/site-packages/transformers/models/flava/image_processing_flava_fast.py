@@ -20,6 +20,9 @@ from collections.abc import Iterable
 from functools import lru_cache
 from typing import Any, Optional, Union
 
+import torch
+from torchvision.transforms.v2 import functional as F
+
 from ...image_processing_utils_fast import (
     BaseImageProcessorFast,
     BatchFeature,
@@ -27,14 +30,11 @@ from ...image_processing_utils_fast import (
     get_size_dict,
 )
 from ...image_transforms import ChannelDimension, group_images_by_shape, reorder_images
-from ...image_utils import ImageInput, PILImageResampling, SizeDict
+from ...image_utils import ImageInput, PILImageResampling, SizeDict, pil_torch_interpolation_mapping
 from ...processing_utils import Unpack
 from ...utils import (
     TensorType,
     auto_docstring,
-    is_torch_available,
-    is_torchvision_available,
-    is_torchvision_v2_available,
 )
 from .image_processing_flava import (
     FLAVA_CODEBOOK_MEAN,
@@ -43,18 +43,6 @@ from .image_processing_flava import (
     FLAVA_IMAGE_STD,
     LOGIT_LAPLACE_EPS,
 )
-
-
-if is_torch_available():
-    import torch
-
-if is_torchvision_available():
-    from ...image_utils import pil_torch_interpolation_mapping
-
-    if is_torchvision_v2_available():
-        from torchvision.transforms.v2 import functional as F
-    else:
-        from torchvision.transforms import functional as F
 
 
 class FlavaMaskingGenerator:

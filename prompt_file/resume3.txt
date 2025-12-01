@@ -1,0 +1,18 @@
+Name:Nodreal Parsons
+Age:46
+Nationality: English
+Place of Birth:United Kingdom
+Email: notrealperson@resume.com
+
+Education:
+Oxford University (2007-2010) - Bsc Philosophy, First Class Honours
+University College London (2016-2017) - Msc Data Science, Distinction
+
+Experience:
+TEK Systems (2007-2009) - Admin Staff
+Blizzard Entertainment(2010-2015) - Human Resources
+Microsoft (2019-2024) - Business Analyst
+
+
+Skills:
+Public Speaking, VBA, SQL, NoSQL, R programming
