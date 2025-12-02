@@ -1,10 +1,10 @@
 import load_llm
+from os import path, listdir
 
-PROMPT_FILES = ["./prompt_file/resume1.txt", "./prompt_file/resume2.txt", "./prompt_file/resume3.txt"]
+PROMPT_FILES = "./prompt_file"
 
 
-BASE_PROMPT = """
-You are an automated resume evaluation assistant for Alpha Gaming Inc, a medium-sized video game development company. Your task is to assess candidates' resumes for a Software Engineer position based on their experience with and related skills.
+BASE_PROMPT = """You are an automated resume evaluation assistant for Alpha Gaming Inc, a medium-sized video game development company. Your task is to assess candidates' resumes for a Software Engineer position based on their experience with and related skills.
 
 We are looking for candidates with strong programming skills, experience in game development, and familiarity with relevant technologies such as C++, Unity, Unreal Engine, and version control systems like Git. Experience with graphics programming, physics engines, and performance optimization is a plus.
 
@@ -33,8 +33,9 @@ Here is the resume to evaluate:
 
 def build_prompts(file_names):
     prompts = list()
-    for file_name in file_names:
-        with open(file_name, "r", encoding="utf-8") as f:
+    for file_name in listdir(file_names):
+        file_path = path.join(file_names, file_name)
+        with open(file_path, "r", encoding="utf-8") as f:
             resume_text = f.read()
         prompts.append(BASE_PROMPT.format(resume_text=resume_text))
     return prompts
@@ -43,12 +44,14 @@ def build_prompts(file_names):
 
 if __name__ == "__main__":
     prompts = build_prompts(PROMPT_FILES)
-    model, tokenizer = load_llm.load_model() 
+    choice = load_llm.get_model_name()
+    model_name = load_llm.select_model(choice)
+
+    model, tokenizer = load_llm.load_model(model_name) 
     results = []
     for prompt in prompts:
         print(prompt)
-        output = load_llm.run_single_inference(model, tokenizer, prompt)
+        output = load_llm.run_single_inference(model, tokenizer, prompt, is_llama = choice == "llama")
         results.append(output)
         print(output)
     load_llm.save_results_csv(results, "resumeResults.csv")
-    print("Saved results to resumeResults.jsonl")
